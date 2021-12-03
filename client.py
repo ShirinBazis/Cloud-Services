@@ -4,6 +4,7 @@ import sys
 import os
 import string
 import random
+import watchdog
 
 #finals
 BUFFER_SIZE = 2300
@@ -34,15 +35,15 @@ except:
 DEST_PORT = 12550
 DIRECTORY_PATH = '/home/odin/Desktop/new1'
 
-#
-#class Handler(watchdog.events.PatternMatchingEventHandler):
-  #  def __init__(self):
- #       watchdog.events.PatternMatchingEventHandler(self, Pattern=['*.*'], ignore_patterns = None,
-  #       ignore_directories = False, cade_sensitive = True)
- #   def on_created(self, event):
- #       print('File was created at {event.src_path}')
-  #  def on_deleted(self, event):
-  #      print('File was deleted at {event.src_path}')
+
+class Handler(watchdog.events.PatternMatchingEventHandler):
+    def __init__(self):
+        watchdog.events.PatternMatchingEventHandler(self, Pattern=['*.*'], ignore_patterns = None,
+         ignore_directories = False, cade_sensitive = True)
+    def on_created(self, event):
+        print('File was created at {event.src_path}')
+    def on_deleted(self, event):
+        print('File was deleted at {event.src_path}')
 
 
 def get_folder_files(folder_files , s, folder_path):
