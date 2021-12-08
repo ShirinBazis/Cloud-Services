@@ -6,7 +6,7 @@ import os
 import sys
 
 #finals
-BUFFER_SIZE = 5000
+BUFFER_SIZE = 2048
 END_MARK = '.'
 ACCEPT = 'ok'
 DEFAULT_ID = '0'
@@ -21,7 +21,7 @@ try:
     DEST_IP = sys.argv[1]
 except:
     DEST_IP = 0
-DEST_IP = 12864
+DEST_IP = 12908
 
 #list of client ids
 ID_LIST = []
@@ -40,18 +40,21 @@ def id_generator(size = ID_LEN, chars=string.ascii_uppercase + string.digits):
 def make_file(new_file):
     f = open(new_file,'wb')
     while True:
+        data = client_socket.recv(BUFFER_SIZE)
+        client_socket.send(ACCEPT.encode())
         try:
-            client_socket.settimeout(0.08)
-            data = client_socket.recv(BUFFER_SIZE)
-            f.write(data)
+            mark = data.decode()
         except:
+            mark = 0
+
+        if(mark == '.'):     
             break
-    client_socket.settimeout(None)
-    client_socket.send(ACCEPT.encode())
+        f.write(data)
     f.close()
 
 def insert_new_folder(folder_path, client_socket):
     #file transfer sequence
+    print('getting file')
     file_data = client_socket.recv(BUFFER_SIZE).decode()
     client_socket.send(ACCEPT.encode())
     while(file_data != END_MARK):
@@ -61,13 +64,17 @@ def insert_new_folder(folder_path, client_socket):
             os.makedirs(folder_path + file_name)
             new_folder_path = folder_path + file_name + '/'        
             #insert file of the new folder
+            print('make new folder')
             insert_new_folder(new_folder_path, client_socket)                  
         else:
             #file creation sequence
             new_file = folder_path + file_name
+            print('make new file at: ' + new_file)
             make_file(new_file)
         #gets new file name
+        print('waiting nex file')
         file_data = client_socket.recv(BUFFER_SIZE).decode()
+        print('got nex file')
         client_socket.send(ACCEPT.encode())
 
 def new_id_protocol(client_socket,client_id, client_pc):
@@ -84,8 +91,10 @@ def get_file(file_path):
     data = x.read(BUFFER_SIZE)
     while(data):
         client_socket.send(data)
+        client_socket.recv(BUFFER_SIZE)
         data = x.read(BUFFER_SIZE)
-    client_socket.recv(BUFFER_SIZE)
+    client_socket.send(END_MARK.encode())
+    client_socket.recv(BUFFER_SIZE)   
     x.close()
 
 def get_folder_files(folder_files , s, folder_path):

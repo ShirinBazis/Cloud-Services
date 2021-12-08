@@ -8,7 +8,7 @@ import watchdog.observers
 import watchdog.events
 
 #finals
-BUFFER_SIZE = 5000
+BUFFER_SIZE = 2048
 END_MARK = '.'
 DEFAULT_ID = '0'
 LOCAL_ID_LEN = 36
@@ -26,7 +26,7 @@ try:
     DEST_PORT = int(sys.argv[2])
     #FILE_PATH = sys.argv[3]
     #DIRECTORY_PATH = '/home/odin/Desktop/test file'
-    DIRECTORY_PATH = '/home/odin/Desktop/new2'
+    DIRECTORY_PATH = '/media/odin/d:/new'
     TIME_INTERVAL = sys.argv[4]
     
 except:
@@ -37,8 +37,8 @@ try:
 
 except:
     ID_NUM = DEFAULT_ID
-DEST_PORT = 12864
-DIRECTORY_PATH = '/home/odin/Desktop/new2'
+DEST_PORT = 12908
+DIRECTORY_PATH = '/media/odin/d:/new'
 
 UPDATES_LIST = []
 
@@ -60,25 +60,31 @@ def get_file(file_path):
     data = x.read(BUFFER_SIZE)
     while(data):
         s.send(data)
+        s.recv(BUFFER_SIZE)
         data = x.read(BUFFER_SIZE)
-    s.recv(BUFFER_SIZE)
+    s.send(END_MARK.encode())
+    s.recv(BUFFER_SIZE)   
     x.close()
 
 def get_folder_files(folder_files , s, folder_path):
     for file_name in folder_files:
         file_path = folder_path + '/' + file_name
         if os.path.isdir(file_path):
+            print('send mark+name')
             s.send(str(FOLDER_MARK + file_name).encode())
             #waits for server acceptance
             s.recv(BUFFER_SIZE)
             #transfer a new folder inside current folder
             new_folder = os.listdir(file_path)
+            print('sending dir')
             get_folder_files(new_folder , s ,file_path)
     
         else:
+            print('send mark+name')
             s.send(str(FILE_MARK + file_name).encode())
             #waits for server acceptance
             s.recv(BUFFER_SIZE)
+            print('sending file')
             get_file(file_path)
 
     s.send(END_MARK.encode())
@@ -89,18 +95,20 @@ def new_id_protocol(s):
     folder_files = os.listdir(DIRECTORY_PATH)
     #file transer sequence
     get_folder_files(folder_files, s, DIRECTORY_PATH)
-    
+
 def make_file(new_file):
     f = open(new_file,'wb')
     while True:
+        data = s.recv(BUFFER_SIZE)
+        s.send(ACCEPT.encode())
         try:
-            s.settimeout(0.08)
-            data = s.recv(BUFFER_SIZE)
-            f.write(data)
+            mark = data.decode()
         except:
+            mark = 0
+
+        if(mark == '.'):     
             break
-    s.settimeout(None)
-    s.send(ACCEPT.encode())
+        f.write(data)
     f.close()
 
 def insert_new_folder(folder_path, client_socket):
@@ -303,7 +311,3 @@ while(True):
         s.send(ACCEPT.encode())
         get_updates_protocol(update_size)
         UPDATES_LIST = []
-
-
-
-    
