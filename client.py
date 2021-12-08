@@ -8,7 +8,7 @@ import watchdog.observers
 import watchdog.events
 
 #finals
-BUFFER_SIZE = 2000
+BUFFER_SIZE = 5000
 END_MARK = '.'
 DEFAULT_ID = '0'
 LOCAL_ID_LEN = 36
@@ -26,7 +26,7 @@ try:
     DEST_PORT = int(sys.argv[2])
     #FILE_PATH = sys.argv[3]
     #DIRECTORY_PATH = '/home/odin/Desktop/test file'
-    DIRECTORY_PATH = '/home/odin/Desktop/new1'
+    DIRECTORY_PATH = '/home/odin/Desktop/new2'
     TIME_INTERVAL = sys.argv[4]
     
 except:
@@ -37,39 +37,32 @@ try:
 
 except:
     ID_NUM = DEFAULT_ID
-DEST_PORT = 12783
-DIRECTORY_PATH = '/home/odin/Desktop/new1'
+DEST_PORT = 12864
+DIRECTORY_PATH = '/home/odin/Desktop/new2'
 
 UPDATES_LIST = []
 
 def on_created(event):
-    print('created at: ',event.src_path)
-    update = CREATED + ',' + event.src_path
-    if 'goutputstream' not in event.src_path:
+    update = CREATED + ',' + str(event.src_path).split(DIRECTORY_PATH)[1]
+    if '.goutputstream' not in event.src_path:
         UPDATES_LIST.append(update)
 def on_deleted(event):
-    print('deleted at: ' + event.src_path)
-    update = DELETED + ',' + event.src_path
+    update = DELETED + ',' + str(event.src_path).split(DIRECTORY_PATH)[1]
     UPDATES_LIST.append(update)
 def on_modified(event):
     pass
 def on_moved(event):
-    print('moved from '+ event.src_path +' to '+ event.dest_path)
-    update = MOVED + ',' + event.src_path + ',' + event.dest_path
+    update = MOVED + ',' + str(event.src_path).split(DIRECTORY_PATH)[1] + ',' + str(event.dest_path).split(DIRECTORY_PATH)[1]
     UPDATES_LIST.append(update)
 
 def get_file(file_path):
     x = open(file_path, 'rb')
-    #reads and sends bytes
     data = x.read(BUFFER_SIZE)
     while(data):
         s.send(data)
-        #waits for server acceptance
-        s.recv(BUFFER_SIZE)
-        data = x.read(BUFFER_SIZE)              
-    s.send(str(END_MARK).encode())
-            #waits for server acceptance
+        data = x.read(BUFFER_SIZE)
     s.recv(BUFFER_SIZE)
+    x.close()
 
 def get_folder_files(folder_files , s, folder_path):
     for file_name in folder_files:
@@ -85,7 +78,7 @@ def get_folder_files(folder_files , s, folder_path):
         else:
             s.send(str(FILE_MARK + file_name).encode())
             #waits for server acceptance
-            s.recv(BUFFER_SIZE)        
+            s.recv(BUFFER_SIZE)
             get_file(file_path)
 
     s.send(END_MARK.encode())
@@ -99,21 +92,15 @@ def new_id_protocol(s):
     
 def make_file(new_file):
     f = open(new_file,'wb')
-    #gets file bytes from client
-    data = s.recv(BUFFER_SIZE)
-    s.send(ACCEPT.encode())
-    try:
-        end_check = data.decode()
-    except:
-        end_check = 0
-    while(end_check != END_MARK):
-        f.write(data)
-        data = s.recv(BUFFER_SIZE)
-        s.send(ACCEPT.encode())
+    while True:
         try:
-            end_check = data.decode()
+            s.settimeout(0.08)
+            data = s.recv(BUFFER_SIZE)
+            f.write(data)
         except:
-            end_check = 0
+            break
+    s.settimeout(None)
+    s.send(ACCEPT.encode())
     f.close()
 
 def insert_new_folder(folder_path, client_socket):
@@ -144,54 +131,119 @@ def local_id_generator(size = LOCAL_ID_LEN, chars=string.ascii_uppercase + strin
     new_id = ''.join(random.choice(chars) for _ in range(size))
     return new_id
 
+def get_indication():
+    file_type = s.recv(BUFFER_SIZE).decode()
+    s.send(ACCEPT.encode())
+    return file_type
+
 def send_indication(path):
     file_flag = 1
     if os.path.isdir(path):
-            print(path + ' is dir')
             s.send(str(FOLDER_MARK).encode())
             file_flag = 0
     else:
-        print(path + ' is not a dir')
         s.send(str(FILE_MARK).encode())
     s.recv(BUFFER_SIZE)
     return file_flag
 
-def updates_protocol():
-    #send client's file name for reference
-    s.send(str(DIRECTORY_PATH.split('/')[-1]).encode())
-    s.recv(BUFFER_SIZE)
+def send_updates_protocol():
     while len(UPDATES_LIST) !=0:
         update_info = UPDATES_LIST.pop(0)
-        print(update_info)
-        print('stuck 1')
         s.send(str(update_info).encode())
         s.recv(BUFFER_SIZE)
-        update_path = update_info.split(',')[1]
-        print('up path: ' + update_path)
+        update_file_name = update_info.split(',')[1]
+        update_path = DIRECTORY_PATH + update_file_name
         file_flag = send_indication(update_path)
-        print('stuck 2')
         if update_info[0] == CREATED:
             if file_flag:
                 get_file(update_path)
             else:
                 #gets files in folder
-                folder_files = os.listdir(DIRECTORY_PATH)
+                folder_files = os.listdir(update_path)
                 #file transer sequence
-                get_folder_files(folder_files, s, DIRECTORY_PATH)
+                indicator = s.recv(BUFFER_SIZE).decode()
+                if indicator == 'continue':
+                    get_folder_files(folder_files, s, update_path)
 
         if update_info[0] == MOVED:
-            move_path = update_info.split(',')[2]
-            print('move path: ' + move_path)
-            if 'goutputstream' in str(update_path):
+            move_file_name = update_info.split(',')[2]
+            move_path = DIRECTORY_PATH + move_file_name
+            if '.goutputstream' in str(update_path):
                 get_file(move_path)
+        try:
+            s.settimeout(0.5)
+            s.recv(BUFFER_SIZE)
+        except Exception:         
+            pass
+        s.settimeout(None)
 
-        s.recv(BUFFER_SIZE)
-        print('finish')
+def remove_dir(dir_path):
+    folder_files = os.listdir(dir_path)
+    for file in folder_files:
+        file_path = dir_path + '/' + file
+        if os.path.isdir(file_path):
+            remove_dir(file_path)
+        else:
+            os.remove(file_path)
+    os.rmdir(dir_path)
 
-def get_port(cur_port):
-    if((cur_port - 12560) == 9):
-        return 12560
-    return cur_port + 1
+def delete_file(path):
+    try:
+        os.remove(path)
+    except Exception:
+        remove_dir(path)
+
+def get_updates_protocol(size):
+    try:
+        index = int(size)
+    except:
+        return 0
+    for x in range(index):
+        update = s.recv(BUFFER_SIZE).decode()
+        s.send(ACCEPT.encode())    
+        update_info = update.split(',')
+        #update type can be c-created m-moved d-deleted
+        update_type = update_info[0]
+        #the path of the file that will be updated
+        update_path = update_info[1]
+        #file type can be @-folder f-file
+        file_type = get_indication()
+        path = DIRECTORY_PATH + update_path
+        #file was created
+        if update_type == CREATED :
+            try:
+                if file_type == FOLDER_MARK:
+                    os.makedirs(path)
+                    folder_path = path + '/'
+                    s.send(b'continue')
+                    insert_new_folder(folder_path, s)
+                else:
+                    make_file(path)
+            except Exception:
+                s.send(b'pass')
+                pass
+        #file was deleted
+        elif update_type == DELETED :
+            try:
+                delete_file(path)
+            except Exception:
+                s.send(ACCEPT.encode())
+                continue
+        #file was moved
+        else:
+            new_path = update_info[2]
+            new_path = DIRECTORY_PATH + new_path
+            if '.goutputstream' in path:
+                delete_file(new_path)
+                make_file(new_path)
+            else:
+                try:
+                    os.replace(path,new_path)
+                except Exception:
+                    s.send(ACCEPT.encode())
+                    continue
+            
+        s.send(ACCEPT.encode())
 
 def handler():
     event_handler = watchdog.events.PatternMatchingEventHandler()
@@ -203,7 +255,6 @@ def handler():
 
 #main
 local_id = local_id_generator()  
-
 event_handler = handler()
 observer = watchdog.observers.Observer()
 observer.schedule(event_handler, DIRECTORY_PATH, recursive = True)
@@ -241,15 +292,18 @@ while(True):
     #waits for server's acceptance
     s.recv(BUFFER_SIZE)
 
-    new_data = s.recv(6).decode()
-    if new_data == 'update':
-        print('update')
-    s.close()
-
     if len(UPDATES_LIST) != 0:
         s.send(str(len(UPDATES_LIST)).encode())
         #waits for server's acceptance
         s.recv(BUFFER_SIZE)
-        updates_protocol()
+        send_updates_protocol()
+
+    update_size = s.recv(BUFFER_SIZE).decode()
+    if update_size != '0' and update_size != '':
+        s.send(ACCEPT.encode())
+        get_updates_protocol(update_size)
+        UPDATES_LIST = []
+
+
 
     

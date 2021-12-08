@@ -6,7 +6,7 @@ import os
 import sys
 
 #finals
-BUFFER_SIZE = 2000
+BUFFER_SIZE = 5000
 END_MARK = '.'
 ACCEPT = 'ok'
 DEFAULT_ID = '0'
@@ -21,7 +21,7 @@ try:
     DEST_IP = sys.argv[1]
 except:
     DEST_IP = 0
-DEST_IP = 12782
+DEST_IP = 12864
 
 #list of client ids
 ID_LIST = []
@@ -39,21 +39,15 @@ def id_generator(size = ID_LEN, chars=string.ascii_uppercase + string.digits):
 
 def make_file(new_file):
     f = open(new_file,'wb')
-    #gets file bytes from client
-    data = client_socket.recv(BUFFER_SIZE)
-    client_socket.send(ACCEPT.encode())
-    try:
-        end_check = data.decode()
-    except:
-        end_check = 0
-    while(end_check != END_MARK):
-        f.write(data)
-        data = client_socket.recv(BUFFER_SIZE)
-        client_socket.send(ACCEPT.encode())
+    while True:
         try:
-            end_check = data.decode()
+            client_socket.settimeout(0.08)
+            data = client_socket.recv(BUFFER_SIZE)
+            f.write(data)
         except:
-            end_check = 0
+            break
+    client_socket.settimeout(None)
+    client_socket.send(ACCEPT.encode())
     f.close()
 
 def insert_new_folder(folder_path, client_socket):
@@ -87,16 +81,12 @@ def new_id_protocol(client_socket,client_id, client_pc):
 
 def get_file(file_path):
     x = open(file_path, 'rb')
-    #reads and sends bytes
     data = x.read(BUFFER_SIZE)
     while(data):
         client_socket.send(data)
-        #waits for server acceptance
-        client_socket.recv(BUFFER_SIZE)
-        data = x.read(BUFFER_SIZE)              
-    client_socket.send(str(END_MARK).encode())
-            #waits for server acceptance
+        data = x.read(BUFFER_SIZE)
     client_socket.recv(BUFFER_SIZE)
+    x.close()
 
 def get_folder_files(folder_files , s, folder_path):
     for file_name in folder_files:
@@ -143,56 +133,100 @@ def get_indication():
     client_socket.send(ACCEPT.encode())
     return file_type
 
-def new_updates_protocol(size):
-    #gets client's folder name for a specific split that will occur later
-    client_folder_name = client_socket.recv(BUFFER_SIZE).decode()
-    print('client folder: ' + client_folder_name)
-    client_socket.send(ACCEPT.encode())
+def send_indication(path):
+    file_flag = 1
+    if os.path.isdir(path):
+            client_socket.send(str(FOLDER_MARK).encode())
+            file_flag = 0
+    else:
+        client_socket.send(str(FILE_MARK).encode())
+    client_socket.recv(BUFFER_SIZE)
+    return file_flag
+
+def send_updates_protocol():
+    while len(CONNECTED_USERS[client_pc]) !=0:
+        update_info = CONNECTED_USERS[client_pc].pop(0)
+        client_socket.send(str(update_info).encode())
+        client_socket.recv(BUFFER_SIZE)
+        update_file_name = update_info.split(',')[1]
+        update_path = SERVER_FOLDER + client_id + update_file_name
+        file_flag = send_indication(update_path)
+        if update_info[0] == CREATED:
+            if file_flag:
+                get_file(update_path)
+            else:
+                #gets files in folder
+                folder_files = os.listdir(update_path)
+                #file transer sequence
+                indicator = client_socket.recv(BUFFER_SIZE).decode()
+                if indicator == 'continue':
+                    get_folder_files(folder_files, client_socket, update_path)
+
+        if update_info[0] == MOVED:
+            move_file_name = update_info.split(',')[2]
+            move_path = SERVER_FOLDER + client_id + move_file_name
+            if '.goutputstream' in str(update_path):
+                get_file(move_path)
+        try:
+            client_socket.settimeout(0.5)
+            client_socket.recv(BUFFER_SIZE)
+        except Exception:
+            pass
+        client_socket.settimeout(None)
+
+def get_updates_protocol(size):
+    try:
+        index = int(size)
+    except:
+        return 0
     #iterations on update notes
-    for x in range(int(size)):  
+    for x in range(index):  
         update = client_socket.recv(BUFFER_SIZE).decode()
-        for pc in USER_DICT[client_id]:
-            CONNECTED_USERS[pc].append(update)
-        update_info = update.split(',')
         client_socket.send(ACCEPT.encode())
+        for pc in USER_DICT[client_id]:
+            if pc != client_pc:
+                CONNECTED_USERS[pc].append(update)
+        update_info = update.split(',')
         #update type can be c-created m-moved d-deleted
         update_type = update_info[0]
         #the path of the file that will be updated
         update_path = update_info[1]
-        #the actuall name of the file
-        file_name = update_path.split(client_folder_name)[1]
         #file type can be @-folder f-file
         file_type = get_indication()
-        path = SERVER_FOLDER + client_id + file_name
+        path = SERVER_FOLDER + client_id + update_path
         #file was created
         if update_type == CREATED :
             try:
                 if file_type == FOLDER_MARK:
                     os.makedirs(path)
                     folder_path = path + '/'
+                    client_socket.send(b'continue')
                     insert_new_folder(folder_path, client_socket)
                 else:
                     make_file(path)
-            except:
-                pass
+            except Exception:
+                client_socket.send(b'pass')
+                continue
         #file was deleted
         elif update_type == DELETED :
             try:
                 delete_file(path)
-            except:
-                pass
+            except Exception:
+                client_socket.send(ACCEPT.encode())
+                continue
         #file was moved
         else:
-            new_path = update_info[2].split(client_folder_name)[1]
-            new_path = SERVER_FOLDER + client_id + new_path
-            try:
-                os.replace(path,new_path)
-            except:
-                pass         
-            if 'goutputstream' in path:
+            new_path = update_info[2]
+            new_path = SERVER_FOLDER + '/' + client_id + new_path
+            if '.goutputstream' in path:
                 delete_file(new_path)
                 make_file(new_path)
-
+            else:
+                try:
+                    os.replace(path,new_path)
+                except Exception:
+                    client_socket.send(ACCEPT.encode())
+                    pass
         client_socket.send(ACCEPT.encode())
             
 #main
@@ -221,7 +255,6 @@ while True:
         client_socket.close()
         continue
     else:
-        print('pc: ' + client_pc)
         if(client_pc not in USER_DICT[client_id]):
             #add new client connection
             USER_DICT[client_id].append(client_pc)
@@ -229,12 +262,6 @@ while True:
             existing_id_protocol(client_socket, client_id)
             client_socket.close()
             continue
-        #sends new updates to client (if there is any)
-        if len(CONNECTED_USERS[client_pc]) != 0:
-            print(CONNECTED_USERS[client_pc])
-            client_socket.send('update'.encode())
-        else:
-            client_socket.send('reg'.encode())
 
         try:
             client_socket.settimeout(0.5)
@@ -242,9 +269,18 @@ while True:
             client_socket.send(ACCEPT.encode())
         except:
             update_size = '0'
+
+        client_socket.settimeout(None)
         if update_size != '0' and update_size != '':
-            client_socket.settimeout(None)
-            new_updates_protocol(update_size)
+            get_updates_protocol(update_size)    
+
+        #sends new updates to client (if there is any)
+        if len(CONNECTED_USERS[client_pc]) != 0:
+            client_socket.send(str(len(CONNECTED_USERS[client_pc])).encode())
+            client_socket.recv(BUFFER_SIZE)
+            send_updates_protocol()
+        else:
+            client_socket.send(b'0')   
 
         #pc operation stack isn't empty
         
