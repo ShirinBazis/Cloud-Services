@@ -18,10 +18,9 @@ MOVED = 'm'
 DELETED = 'd'
 
 try:
-    DEST_IP = sys.argv[1]
+    SERVER_PORT = int(sys.argv[1])
 except:
-    DEST_IP = 0
-DEST_IP = 12908
+    sys.exit()
 
 #list of client ids
 ID_LIST = []
@@ -51,6 +50,20 @@ def make_file(new_file):
             break
         f.write(data)
     f.close()
+
+def helper(folder_path):
+    server_files = os.listdir(folder_path)
+    for file in server_files:    
+        client_socket.send(file.encode())
+        client_socket.recv(BUFFER_SIZE)
+        file_path = folder_path + file + '/'
+        if os.path.isdir(file_path):
+            send_server_file_names(file_path)
+
+def send_server_file_names(folder_path):
+    helper(folder_path)
+    client_socket.send(END_MARK.encode())
+            
 
 def insert_new_folder(folder_path, client_socket):
     #file transfer sequence
@@ -99,26 +112,30 @@ def get_file(file_path):
 
 def get_folder_files(folder_files , s, folder_path):
     for file_name in folder_files:
+        print('new file')
         file_path = folder_path + '/' + file_name
         if os.path.isdir(file_path):
-            s.send(str(FOLDER_MARK + file_name).encode())
+            client_socket.send(str(FOLDER_MARK + file_name).encode())
             #waits for server acceptance
-            s.recv(BUFFER_SIZE)
+            print('waiting 1')
+            client_socket.recv(BUFFER_SIZE)
             #transfer a new folder inside current folder
             new_folder = os.listdir(file_path)
             get_folder_files(new_folder , s ,file_path) 
         else:
-            s.send(str(FILE_MARK + file_name).encode())
+            client_socket.send(str(FILE_MARK + file_name).encode())
             #waits for server acceptance
-            s.recv(BUFFER_SIZE)        
+            print('waiting 2')
+            client_socket.recv(BUFFER_SIZE)        
             get_file(file_path)
 
-    s.send(END_MARK.encode())
-    s.recv(BUFFER_SIZE)
+    client_socket.send(END_MARK.encode())
+    client_socket.recv(BUFFER_SIZE)
 
 def existing_id_protocol(client_socket, client_id):   
     client_folder_path = SERVER_FOLDER + client_id + '/'
     folder_files = os.listdir(client_folder_path)
+    print('getting files for server dir')
     get_folder_files(folder_files, client_socket, client_folder_path)
 
 def remove_dir(dir_path):
@@ -152,13 +169,22 @@ def send_indication(path):
     client_socket.recv(BUFFER_SIZE)
     return file_flag
 
+def send_update_list_protocol():
+    for update in CONNECTED_USERS[client_pc]:
+        print(update)
+        client_socket.send(str(update).encode())
+        client_socket.recv(BUFFER_SIZE)
+    client_socket.send(END_MARK.encode())
+
 def send_updates_protocol():
     while len(CONNECTED_USERS[client_pc]) !=0:
         update_info = CONNECTED_USERS[client_pc].pop(0)
         client_socket.send(str(update_info).encode())
+        print('stuck 1')
         client_socket.recv(BUFFER_SIZE)
         update_file_name = update_info.split(',')[1]
         update_path = SERVER_FOLDER + client_id + update_file_name
+        print('getting indication')
         file_flag = send_indication(update_path)
         if update_info[0] == CREATED:
             if file_flag:
@@ -167,6 +193,7 @@ def send_updates_protocol():
                 #gets files in folder
                 folder_files = os.listdir(update_path)
                 #file transer sequence
+                print('stuck 2')
                 indicator = client_socket.recv(BUFFER_SIZE).decode()
                 if indicator == 'continue':
                     get_folder_files(folder_files, client_socket, update_path)
@@ -190,6 +217,7 @@ def get_updates_protocol(size):
         return 0
     #iterations on update notes
     for x in range(index):  
+        print('new update')
         update = client_socket.recv(BUFFER_SIZE).decode()
         client_socket.send(ACCEPT.encode())
         for pc in USER_DICT[client_id]:
@@ -203,6 +231,7 @@ def get_updates_protocol(size):
         #file type can be @-folder f-file
         file_type = get_indication()
         path = SERVER_FOLDER + client_id + update_path
+        print(path)
         #file was created
         if update_type == CREATED :
             try:
@@ -240,7 +269,7 @@ def get_updates_protocol(size):
             
 #main
 server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-server.bind(('', DEST_IP))
+server.bind(('', SERVER_PORT))
 server.listen(5)
 
 while True:
@@ -261,33 +290,40 @@ while True:
         client_socket.send(client_id.encode())
         #print(client_address[1],' connected')
         new_id_protocol(client_socket,client_id, client_pc)
-        client_socket.close()
-        continue
     else:
         if(client_pc not in USER_DICT[client_id]):
             #add new client connection
             USER_DICT[client_id].append(client_pc)
             CONNECTED_USERS[client_pc] = []
+            print('sending update list')
+            path = SERVER_FOLDER + client_id + '/'
+            send_server_file_names(path)
+            print('entering ex id prot')
             existing_id_protocol(client_socket, client_id)
-            client_socket.close()
-            continue
+            print('finished ex id prot')
 
         try:
             client_socket.settimeout(0.5)
             update_size = client_socket.recv(BUFFER_SIZE).decode()
+            print('got updates')
             client_socket.send(ACCEPT.encode())
         except:
             update_size = '0'
 
         client_socket.settimeout(None)
         if update_size != '0' and update_size != '':
+            print('getting updates')
             get_updates_protocol(update_size)    
 
         #sends new updates to client (if there is any)
         if len(CONNECTED_USERS[client_pc]) != 0:
             client_socket.send(str(len(CONNECTED_USERS[client_pc])).encode())
             client_socket.recv(BUFFER_SIZE)
+            print('sending update list')
+            send_update_list_protocol()
+            print('sending updates')
             send_updates_protocol()
+            print('finished sending uppdates')
         else:
             client_socket.send(b'0')   
 
