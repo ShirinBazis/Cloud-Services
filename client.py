@@ -53,8 +53,11 @@ INCOMING_UPDATES = []
 SERVER_FILES = []
 
 def on_created(event):
+    print('path at: '+ event.src_path)
     file_path = str(event.src_path).split(FILE_PATH)[1]
+    print('modified path: '+ file_path)
     file_Name = file_path.split('/')[-1]
+    print('file name: '+ file_Name)
     update = CREATED + ',' + file_path
     if '.goutputstream' not in event.src_path:
         print(UPDATE_FLAG)
@@ -128,7 +131,8 @@ def get_folder_files(folder_files , s, folder_path):
             #transfer a new folder inside current folder
             new_folder = os.listdir(file_path)
             print('sending dir')
-            get_folder_files(new_folder , s ,file_path)
+            new_path = file_path + '/'
+            get_folder_files(new_folder , s ,new_path)
     
         else:
             print('send mark+name')
@@ -156,11 +160,11 @@ def make_file(new_file):
             mark = data.decode()
         except:
             mark = 0
-
         if(mark == '.'):     
             break
         f.write(data)
     f.close()
+    print('finished making file')
 
 def get_update_list_protocol():
     list = []
@@ -177,7 +181,15 @@ def get_update_list_protocol():
 def get_server_file_names():
     list = []
     while True:
-        file_name = s.recv(BUFFER_SIZE).decode()
+        print('stuck')
+        try:
+            s.settimeout(0.1)
+            file_name = s.recv(BUFFER_SIZE).decode()
+        except:
+            s.settimeout(None)
+            s.send(ACCEPT.encode())
+            file_name = s.recv(BUFFER_SIZE).decode()
+        print(file_name)
         if file_name != END_MARK:
             print(file_name)
             list.append(file_name)
@@ -193,9 +205,11 @@ def insert_new_folder(folder_path, client_socket):
     file_data = client_socket.recv(BUFFER_SIZE).decode()
     client_socket.send(ACCEPT.encode())
     while(file_data != END_MARK):
+        print(file_data)
         file_name = file_data[1:]
-        data_type = file_data[0]     
-        if data_type == FOLDER_MARK:
+        data_type = file_data[0]
+        print('type is: ' +data_type)
+        if data_type == FOLDER_MARK:        
             os.makedirs(folder_path + file_name)
             new_folder_path = folder_path + file_name + '/'        
             #insert file of the new folder
@@ -206,7 +220,9 @@ def insert_new_folder(folder_path, client_socket):
             make_file(new_file)
         #gets new file name
         print('stuck 2')
-        file_data = client_socket.recv(BUFFER_SIZE).decode()
+        file_data = client_socket.recv(BUFFER_SIZE)
+        print(file_data)
+        file_data = file_data.decode()
         client_socket.send(ACCEPT.encode())
 
 def existing_id_protocol(s):
@@ -242,7 +258,9 @@ def send_updates_protocol():
         print('first rec need ack: ' + slip)
         update_file_name = update_info.split(',')[1]
         update_path = FILE_PATH + update_file_name
+        print('sending indi')
         file_flag = send_indication(update_path)
+        print('sent indi')
         if update_info[0] == CREATED:
             if file_flag:
                 get_file(update_path)
@@ -404,8 +422,15 @@ while(True):
         s.recv(BUFFER_SIZE)
         print('sending updates')
         send_updates_protocol()
+        print('finished updating')
 
     update_size = s.recv(BUFFER_SIZE).decode()
+    try:
+        size = int(update_size)
+    except:
+        time.sleep(TIME_INTERVAL)
+        continue
+    print('update size: ' + update_size)
     if update_size != '0' and update_size != '':
         s.send(ACCEPT.encode())
         #entering update mode
